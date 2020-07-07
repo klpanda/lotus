@@ -3,7 +3,6 @@ package state
 import (
 	"bytes"
 	"context"
-
 	"github.com/ipfs/go-cid"
 	cbor "github.com/ipfs/go-ipld-cbor"
 	typegen "github.com/whyrusleeping/cbor-gen"
@@ -107,6 +106,166 @@ func (sp *StatePredicates) OnDealStateChanged(diffDealStates DiffDealStatesFunc)
 
 		return diffDealStates(ctx, oldRoot, newRoot)
 	}
+}
+
+type MarketProposalChanges struct {
+	Added    []market.DealProposal
+	Modified []ProposalModification
+	Removed  []market.DealProposal
+}
+
+var _ AdtArrayDiff = &MarketProposalChanges{}
+
+func (m *MarketProposalChanges) Add(val *typegen.Deferred) error {
+	dp := new(market.DealProposal)
+	err := dp.UnmarshalCBOR(bytes.NewReader(val.Raw))
+	if err != nil {
+		return err
+	}
+	m.Added = append(m.Added, *dp)
+	return nil
+}
+
+func (m *MarketProposalChanges) Modify(from, to *typegen.Deferred) error {
+	// short circuit, DealProposals are static
+	return nil
+}
+
+func (m *MarketProposalChanges) Remove(val *typegen.Deferred) error {
+	dp := new(market.DealProposal)
+	err := dp.UnmarshalCBOR(bytes.NewReader(val.Raw))
+	if err != nil {
+		return err
+	}
+	m.Removed = append(m.Removed, *dp)
+	return nil
+}
+
+type ProposalModification struct {
+	From market.DealProposal
+	To   market.DealProposal
+}
+
+func (sp *StatePredicates) OnDealProposalStateChanged() DiffStorageMarketStateFunc {
+	return func(ctx context.Context, oldState, newState *market.State) (changed bool, user UserData, err error) {
+		ctxStore := &contextStore{
+			ctx: ctx,
+			cst: sp.cst,
+		}
+
+		if oldState.Proposals.Equals(newState.Proposals) {
+			return false, nil, nil
+		}
+
+		oldProps, err := adt.AsArray(ctxStore, oldState.Proposals)
+		if err != nil {
+			return false, nil, err
+		}
+
+		newProps, err := adt.AsArray(ctxStore, newState.Proposals)
+		if err != nil {
+			return false, nil, err
+		}
+
+		proposalChanges := new(MarketProposalChanges)
+		if err := DiffAdtArray(oldProps, newProps, proposalChanges); err != nil {
+			return false, nil, err
+		}
+
+		if len(proposalChanges.Added)+len(proposalChanges.Modified)+len(proposalChanges.Removed) == 0 {
+			return false, nil, nil
+		}
+
+		return true, proposalChanges, nil
+	}
+}
+
+type MarketDealStateChanges struct {
+	Added    []market.DealState
+	Modified []DealStateChange
+	Removed  []market.DealState
+}
+
+var _ AdtArrayDiff = &MarketDealStateChanges{}
+
+func (m *MarketDealStateChanges) Add(val *typegen.Deferred) error {
+	ds := new(market.DealState)
+	err := ds.UnmarshalCBOR(bytes.NewReader(val.Raw))
+	if err != nil {
+		return err
+	}
+	m.Added = append(m.Added, *ds)
+	return nil
+}
+
+func (m *MarketDealStateChanges) Modify(from, to *typegen.Deferred) error {
+	dsFrom := new(market.DealState)
+	if err := dsFrom.UnmarshalCBOR(bytes.NewReader(from.Raw)); err != nil {
+		return err
+	}
+
+	dsTo := new(market.DealState)
+	if err := dsTo.UnmarshalCBOR(bytes.NewReader(to.Raw)); err != nil {
+		return err
+	}
+
+	if *dsFrom != *dsTo {
+		m.Modified = append(m.Modified, DealStateChange{
+			From: *dsFrom,
+			To:   *dsTo,
+		})
+	}
+	return nil
+}
+
+func (m *MarketDealStateChanges) Remove(val *typegen.Deferred) error {
+	ds := new(market.DealState)
+	err := ds.UnmarshalCBOR(bytes.NewReader(val.Raw))
+	if err != nil {
+		return err
+	}
+	m.Removed = append(m.Removed, *ds)
+	return nil
+}
+
+type DealStateModification struct {
+	From market.DealState
+	To   market.DealState
+}
+
+func (sp *StatePredicates) OnDealStateStateChanged() DiffStorageMarketStateFunc {
+	return func(ctx context.Context, oldState, newState *market.State) (changed bool, user UserData, err error) {
+		ctxStore := &contextStore{
+			ctx: ctx,
+			cst: sp.cst,
+		}
+
+		if oldState.States.Equals(newState.States) {
+			return false, nil, nil
+		}
+
+		oldProps, err := adt.AsArray(ctxStore, oldState.States)
+		if err != nil {
+			return false, nil, err
+		}
+
+		newProps, err := adt.AsArray(ctxStore, newState.States)
+		if err != nil {
+			return false, nil, err
+		}
+
+		proposalChanges := new(MarketProposalChanges)
+		if err := DiffAdtArray(oldProps, newProps, proposalChanges); err != nil {
+			return false, nil, err
+		}
+
+		if len(proposalChanges.Added)+len(proposalChanges.Modified)+len(proposalChanges.Removed) == 0 {
+			return false, nil, nil
+		}
+
+		return true, proposalChanges, nil
+	}
+
 }
 
 // ChangedDeals is a set of changes to deal state
