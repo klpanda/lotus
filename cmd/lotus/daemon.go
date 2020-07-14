@@ -166,16 +166,16 @@ var DaemonCmd = &cli.Command{
 				log.Infof("lotus repo: %s", dir)
 			}
 		}
-
+		//创建FsRepo,即lotus的Repo
 		r, err := repo.NewFS(cctx.String("repo"))
 		if err != nil {
 			return xerrors.Errorf("opening fs repo: %w", err)
 		}
-
+		//初始化Repo,例如创建初始文件等
 		if err := r.Init(repo.FullNode); err != nil && err != repo.ErrRepoExists {
 			return xerrors.Errorf("repo init error: %w", err)
 		}
-
+		//获取参数文件
 		if err := paramfetch.GetParams(lcli.ReqContext(cctx), build.ParametersJSON(), 0); err != nil {
 			return xerrors.Errorf("fetching proof parameters: %w", err)
 		}
@@ -205,7 +205,7 @@ var DaemonCmd = &cli.Command{
 				return nil
 			}
 		}
-
+		//如果是Genesis启动方式,则加载Genesis文件
 		genesis := node.Options()
 		if len(genBytes) > 0 {
 			genesis = node.Override(new(modules.Genesis), modules.LoadGenesis(genBytes))
@@ -220,13 +220,14 @@ var DaemonCmd = &cli.Command{
 		shutdownChan := make(chan struct{})
 
 		var api api.FullNode
-
+		//创建全节点, 从第二个参数起都是Option
 		stop, err := node.New(ctx,
 			node.FullAPI(&api),
-
 			node.Override(new(dtypes.Bootstrapper), isBootstrapper),
 			node.Override(new(dtypes.ShutdownChan), shutdownChan),
+			//上线, 多数初始化逻辑在此实现
 			node.Online(),
+			//Repo相关的初始化
 			node.Repo(r),
 
 			genesis,
@@ -264,13 +265,14 @@ var DaemonCmd = &cli.Command{
 
 		// Set the metric to one so it is published to the exporter
 		stats.Record(ctx, metrics.LotusInfo.M(1))
-
+		//根据repo内的配置创建APIEndpoint, 即网络监听对象
 		endpoint, err := r.APIEndpoint()
 		if err != nil {
 			return xerrors.Errorf("getting api endpoint: %w", err)
 		}
 
 		// TODO: properly parse api endpoint (or make it a URL)
+		//启动RPC服务
 		return serveRPC(api, stop, endpoint, shutdownChan)
 	},
 	Subcommands: []*cli.Command{
